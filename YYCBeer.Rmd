@@ -1,0 +1,74 @@
+---
+title: "YYC Beer"
+author: "Regina McCreary"
+date: "September 9, 2016"
+output: html_document
+---
+
+Untappd has a Top 150 list that uses a bayesian ranking system to weight a beer's pure average rating (what the user sees on Untappd) based on the number of times it has been rated. This project is to apply the same logic to beer brewed in Calgary.
+
+Step 1 was to scrape the data from Untappd which I did using import.io. I grabbed all of the ratings for Tool Shed, Wild Rose, Big Rock, Village, Dandy, Banded Peak, Last Best, Fahr (because he's not actually in Turner Valley yet), Trolley 5, Goat Locker and Boiling Oar. Sadly there is no way to pick a location in Untappd so I picked the breweries off the top of my head - if I missed anyone, I sincerely apologize. I omitted Minhas and Brewsters on purpose as there is no way that I am aware of to distinguish which of their beers are Calgary ones. It will be easy enough to rerun this with new data as new breweries come online.
+
+
+I did the data scrape on August 31 and the resulting csv file is cd954681-0a65-4731-b1a4-7068d7e90635.csv
+
+The dataset was pretty ugly and included duplicate entries for Tool Shed so first I chose the relevant columns and did some cleanup.
+
+```{r}
+library(dplyr)
+library(tidyr)
+
+beer <- read.csv("cd954681-0a65-4731-b1a4-7068d7e90635.csv", stringsAsFactors = FALSE)
+
+# clean it up a bit first
+# need to extricate the number from Raters.value and Num.value.1
+# Raters.value has Rating and Ratings plus any with comma go NA
+
+beer_df <- tbl_df(beer[,c(1, 5, 7:12)])
+names(beer_df)<- c("Brewery", "Name", "Style", "ABV", "IBUs", "Rating", "NumRatings", "DateAdded")
+# Toolshed came in 2x need to remove duplicates before any math
+beer_df <- unique(beer_df)
+beer_df$NumRatings <-  sub(" Rating(s)?", "", beer_df$NumRatings)
+beer_df$NumRatings <-  as.numeric(sub(",", "", beer_df$NumRatings))
+beer_df$Rating <- sub("\\(", "", beer_df$Rating)
+beer_df$Rating <- as.numeric(sub(")", "", beer_df$Rating))
+beer_df$Brewery <- sub("https://untappd.com/", "", beer_df$Brewery)
+beer_df$Brewery <- sub("/beer", "", beer_df$Brewery)
+rm("beer")
+```
+
+Untappd ratings math follows:  
+$avg_num_ratings // Average number of ratings in all beers  
+$avg_rating  // Average rating for all beers  
+$this_num_rating  // Number of votes for the beer in question  
+$this_rating  // Pure Average Rating for the beer in Question  
+
+$bayesian_rating = ( ($avg_num_ratings * $avg_rating) + ($this_num_rating * this_rating) ) / ($avg_num_ratings + $this_num_rating);  
+for more info visit http://help.untappd.com/kb/beer-guidelines/how-are-ratings-determined-on-untappd  
+
+
+So first I needed to calculate the average number of ratings in all Calgary beers and the average rating for all Calgary beers in order to be able to do the math. Likely this could have all been done more efficiently but this worked for me.
+```{r}
+avgNR <- summarize(beer_df, avgNR=mean(NumRatings))
+# this makes a dataframe so extracting the value
+avg_num_ratings <- avgNR[[1]]
+
+avgR <- summarize(beer_df, avgR=mean(Rating, na.rm = TRUE))
+avg_rating <- avgR[[1]]
+```
+
+Next I did the calculation and made the ranking table:
+```{r}
+ranking <-  beer_df %>% 
+    filter(NumRatings>9)%>% 
+    mutate(adjRating = ( (avg_num_ratings * avg_rating) + (NumRatings * Rating) ) / (avg_num_ratings + NumRatings))%>%
+    arrange(desc(adjRating))%>%
+        print
+```
+Here are the top 10.
+
+```{r, echo=FALSE}
+ranking[1:10, c(1:2, 7, 9, 6)]
+```
+
+
